@@ -1,5 +1,6 @@
 name: Daily DSE Stock Scan
 
+
 on:
   schedule:
     # Runs at 9:30 AM UTC = 3:30 PM Bangladesh time (UTC+6). Monday to Friday.
