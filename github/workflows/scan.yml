@@ -1,11 +1,17 @@
 name: Daily DSE Stock Scan
 
-
 on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  
+  # Automatically runs when you push a change to the main branch
+  push:
+    branches:
+      - main
+      
+  # Runs at 9:30 AM UTC = 3:30 PM Bangladesh time (UTC+6). Monday to Friday.
   schedule:
-    # Runs at 9:30 AM UTC = 3:30 PM Bangladesh time (UTC+6). Monday to Friday.
     - cron: '30 9 * * 1-5'
-  workflow_dispatch: # Allows you to run it manually
 
 permissions:
   contents: write
