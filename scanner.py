@@ -3030,7 +3030,7 @@ def generate_bangla_all_in_one_html(reports, timestamp, account_equity=1000000.0
     parts.append(f'<title>সব বাংলা রিপোর্ট (একীভূত – ৬টি ট্যাব) — {dts}</title>')
     parts.append('''<style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#eef2f7; color:#1f2937; padding:12px; line-height:1.65; }
+body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#ffffff; color:#1f2937; padding:12px; line-height:1.65; }
 .wrap { max-width:1400px; margin:0 auto; }
 .head { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); border-radius:20px; padding:22px 26px; margin-bottom:14px; color:#fff; box-shadow:0 10px 40px rgba(102,126,234,0.28); }
 .head h1 { font-size:24px; margin-bottom:4px; }
