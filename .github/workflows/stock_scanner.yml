@@ -36,12 +36,14 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run DSE Scanner
+        env:
+          # Optional: Add a PROXY_URL secret in GitHub if curl_cffi alone gets blocked
+          PROXY_URL: ${{ secrets.PROXY_URL }} 
         run: python scanner.py
 
       - name: Ensure Report Directory Exists
         run: mkdir -p Stock_Report/bangla_summary
 
-      # 👇 THIS IS THE NEW STEP THAT FIXES THE 404 👇
       - name: Create index.html from latest report
         run: |
           cd Stock_Report/bangla_summary/
