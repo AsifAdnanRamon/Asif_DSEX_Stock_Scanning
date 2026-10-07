@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DSE Canvas Scanner – v1.27 (GitHub Actions Edition)
+DSE Canvas Scanner – v1.28 (Cloudflare Bypass Edition)
 ================================================================================
 Automated version for cloud execution.
-- Removed interactive input prompts.
-- Removed auto-install logic (handled by requirements.txt).
-- Hardcoded execution to 'Combined Batch Scan' with default equity.
+- Integrated curl_cffi to bypass Cloudflare TLS fingerprinting.
+- Added optional PROXY_URL support via environment variables.
 ================================================================================
 """
 
@@ -23,10 +22,18 @@ from collections import Counter
 
 import pandas as pd
 import numpy as np
-import requests
+
+# --- HTTP LIBRARY SWAP ---
+try:
+    from curl_cffi import requests as cffi_requests
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+    import requests
+
 from bs4 import BeautifulSoup
 
-# Try importing bdshare (installed via requirements.txt)
+# Try importing bdshare
 try:
     import bdshare as _BDSHARE_MODULE
 except ImportError:
@@ -50,7 +57,7 @@ for d in [DATA_DIR, CACHE_DIR, RESULTS_DIR, BANGLA_DIR, DIAG_DIR]:
 HEALTH_CACHE_PATH = Path(CACHE_DIR) / "data_health.json"
 
 MAX_WORKERS              = 4
-ACCOUNT_EQUITY           = 120000.0  # Hardcoded for cloud
+ACCOUNT_EQUITY           = 120000.0
 VOLUME_ANOMALY_THRESHOLD = 30.0
 LIQUIDITY_THRESHOLD      = 10_000_000
 
@@ -360,25 +367,33 @@ class MarketDatabase:
         if self.conn: self.conn.close()
 
 
-# ==================== HTTP SESSION ====================
-SESSION = requests.Session()
-SESSION.verify = False
-
+# ==================== HTTP SESSION (REWRITTEN FOR CLOUDFLARE) ====================
 @dataclass
 class DSEConfig:
     verify_ssl: bool = False
-    min_request_interval: float = 0.4
+    min_request_interval: float = 0.8  # Increased delay to be safer
     max_retries: int = 3
-    backoff_base: float = 1.5
-    user_agent: str = "dse-swing-analyzer/3.3 (personal research)"
-    connect_timeout: float = 5.0
-    read_timeout: float = 20.0
+    backoff_base: float = 2.0
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+    connect_timeout: float = 15.0
+    read_timeout: float = 30.0
+    proxy_url: Optional[str] = None
 
 
 class PoliteSession:
     def __init__(self, cfg: DSEConfig):
         self.cfg = cfg
-        self.session = requests.Session()
+        
+        # --- BYPASS CLOUDFLARE USING CURL_CFFI ---
+        if CURL_CFFI_AVAILABLE:
+            # Impersonate Chrome to bypass TLS fingerprinting
+            self.session = cffi_requests.Session(impersonate="chrome110")
+            print("✅ curl_cffi loaded - Cloudflare bypass enabled.")
+        else:
+            import requests
+            self.session = requests.Session()
+            print("⚠️ curl_cffi NOT found. Using standard requests (may be blocked by Cloudflare).")
+
         self.session.verify = cfg.verify_ssl
         self.session.headers.update({
             "User-Agent": cfg.user_agent,
@@ -387,8 +402,14 @@ class PoliteSession:
         })
         self._last_hit: dict = {}
         self._lock = threading.Lock()
+        
+        # Setup Proxy if provided
+        self.proxies = None
+        if cfg.proxy_url:
+            self.proxies = {"http": cfg.proxy_url, "https": cfg.proxy_url}
+            print(f"✅ Proxy configured: {cfg.proxy_url.split('@')[-1] if '@' in cfg.proxy_url else 'Active'}")
 
-    def get(self, url: str, **kw) -> Optional[requests.Response]:
+    def get(self, url: str, **kw) -> Optional[Any]:
         host = urlparse(url).netloc
         for attempt in range(self.cfg.max_retries):
             if attempt > 0:
@@ -400,17 +421,26 @@ class PoliteSession:
                     time.sleep(wait)
                 self._last_hit[host] = time.monotonic()
             try:
+                # Add proxy if configured
+                if self.proxies:
+                    kw['proxies'] = self.proxies
+                    
                 r = self.session.get(url,
                                      timeout=(self.cfg.connect_timeout, self.cfg.read_timeout),
                                      **kw)
                 if r.status_code == 200 and len(r.text) > 5:
                     return r
-            except requests.RequestException:
+                elif r.status_code == 403:
+                    print(f"   ⚠️ Cloudflare blocked request to {host} (403). Retrying...")
+            except Exception as e:
+                print(f"   ⚠️ Request error to {host}: {str(e)[:50]}")
                 continue
         return None
 
 
-_CFG = DSEConfig()
+# Get proxy from environment variables (for GitHub Actions secrets)
+PROXY_URL_ENV = os.environ.get("PROXY_URL")
+_CFG = DSEConfig(proxy_url=PROXY_URL_ENV)
 _HTTP = PoliteSession(_CFG)
 
 
@@ -2658,7 +2688,6 @@ def report_to_bangla_dict(r, dts):
 
 
 # ==================== HTML GENERATOR ====================
-# (Full HTML generation logic preserved as per original notebook)
 def generate_bangla_all_in_one_html(reports, timestamp, account_equity=1000000.0, ab_mode='LONG'):
     try:
         dto = dt.datetime.strptime(timestamp, '%Y%m%d_%H%M')
@@ -3284,7 +3313,7 @@ body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#
 
     parts.append(f'''
   <div class="head">
-    <h1>📄 সব বাংলা রিপোর্ট (একীভূত – ৬টি ট্যাব) — v1.27 (Failure-Tracked)</h1>
+    <h1>📄 সব বাংলা রিপোর্ট (একীভূত – ৬টি ট্যাব) — v1.28 (Cloudflare Bypass)</h1>
     <div class="sub">রিপোর্ট সময়: <b>{dts}</b> &bull; অ্যাকাউন্ট: <b>{account_equity:,.0f}</b> টাকা</div>
     <div class="mode">📈 A/B মোড: {'স্বল্পমেয়াদী (১০ দিন)' if ab_mode == 'SHORT' else 'দীর্ঘমেয়াদী (২০ দিন)'}</div>
   </div>''')
@@ -3302,7 +3331,7 @@ body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#
     parts.append(f'''
   <div id="tab-swingparam" class="tab-content active">
     <div class="sum-head" style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border-left:5px solid #f59e0b;">
-      <h2>🎯 Swing Parameter — একীভূত ভিউ (v1.27)</h2>
+      <h2>🎯 Swing Parameter — একীভূত ভিউ (v1.28)</h2>
       <div class="sub">মোট স্টক: <b>{sp_total}</b></div>
       <div class="counts">
         <div class="cnt buy"><div class="num">{sp_buy}</div><div class="lbl">🟢 BUY</div></div>
@@ -3353,7 +3382,7 @@ body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#
     parts.append(f'''
   <div id="tab-hike" class="tab-content">
     <div class="sum-head" style="background:linear-gradient(135deg,#fef2f2,#fee2e2);border-left:5px solid #dc2626;">
-      <h2>🥾 Hike-Tier Engine — v1.27</h2>
+      <h2>🥾 Hike-Tier Engine — v1.28</h2>
       <div class="sub">Extension = (close / SMA_20 − 1) × 100 &nbsp;|&nbsp; মোট: <b>{hike_total}</b></div>
       <div class="counts">
         <div class="cnt tier-none"><div class="num">{hike_counts.get(TIER_NONE,0)}</div><div class="lbl">⚪ NONE</div></div>
@@ -3412,7 +3441,7 @@ body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#
     parts.append(f'''
   <div id="tab-ab" class="tab-content">
     <div class="sum-head">
-      <h2>📊 Swing A/B Testing MCMC (v1.27, Risk 1.2%)</h2>
+      <h2>📊 Swing A/B Testing MCMC (v1.28, Risk 1.2%)</h2>
       <div class="counts">
         <div class="cnt stat-blue"><div class="num">{ab_total}</div><div class="lbl">মোট</div></div>
         <div class="cnt stat-blue"><div class="num">{ab_a}</div><div class="lbl">🅰️ মোমেন্টাম</div></div>
@@ -3437,7 +3466,7 @@ body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#
     parts.append(f'''
   <div id="tab-fuzzy" class="tab-content">
     <div class="sum-head">
-      <h2>🧠 ফাজি লজিক বাংলা রিপোর্ট — v1.27</h2>
+      <h2>🧠 ফাজি লজিক বাংলা রিপোর্ট — v1.28</h2>
       <div class="counts">
         <div class="cnt"><div class="num">{fz_total}</div><div class="lbl">মোট</div></div>
         <div class="cnt stat-green"><div class="num">{fz_sb}</div><div class="lbl">🟢🟢 দৃঢ় ক্রয়</div></div>
@@ -3463,7 +3492,7 @@ body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#
     parts.append(f'''
   <div id="tab-sme" class="tab-content">
     <div class="sum-head">
-      <h2>🚀 Swing Momentum Engine (v1.27)</h2>
+      <h2>🚀 Swing Momentum Engine (v1.28)</h2>
       <div class="counts">
         <div class="cnt"><div class="num">{sme_total}</div><div class="lbl">মোট</div></div>
         <div class="cnt sell"><div class="num">{sme_strong}</div><div class="lbl">🔥 শক্তিশালী</div></div>
@@ -3493,7 +3522,7 @@ body { font-family:'Noto Sans Bengali','Segoe UI',Arial,sans-serif; background:#
 
     parts.append(f'''
   <div class="foot">
-    DSE Canvas Scanner • ৬টি ট্যাব • v1.27 • {dts}<br>
+    DSE Canvas Scanner • ৬টি ট্যাব • v1.28 • {dts}<br>
     ⚠️ এই রিপোর্ট শুধুমাত্র তথ্যসূত্র। বিনিয়োগের আগে নিজে যাচাই করুন।
   </div>
 </div>
@@ -4149,7 +4178,7 @@ def _print_clean_summary(reports, failed, total, failures_csv_path=None):
 
 def canvas_batch_scan(account_equity=120000.0, generate_buy_cond=True, combined=True, ab_mode='LONG'):
     print("\n" + "=" * 80)
-    print(f"📊 CANVAS BATCH SCAN – v1.27 (Failure-Tracked) | Mode: {ab_mode}")
+    print(f"📊 CANVAS BATCH SCAN – v1.28 (Cloudflare Bypass) | Mode: {ab_mode}")
     print("=" * 80 + "\n")
 
     print("🔄 Prefetching live prices + market data (single API call)...")
@@ -4267,7 +4296,7 @@ def canvas_batch_scan(account_equity=120000.0, generate_buy_cond=True, combined=
 
 # ==================== AUTOMATED MAIN ENTRY POINT ====================
 if __name__ == "__main__":
-    print("🚀 Starting DSE Canvas Scanner (Automated GitHub Actions Run)...")
+    print("🚀 Starting DSE Canvas Scanner (Cloudflare Bypass Edition)...")
     print("⚙️  Configuration: Account Equity = 120,000 BDT | Mode = LONG | Batch = Combined")
     
     # Run the combined batch scan directly (Non-interactive)
